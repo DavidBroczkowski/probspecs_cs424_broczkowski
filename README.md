@@ -2,7 +2,7 @@
 
 
 # Probabilistic Verification of Neural Networks
-This repository contains the code for the paper "Probabilistic Verification of Neural Networks using Branch and Bound" by David Boetius, Stefan Leue, and Tobias Sutter, to appear at ICML 2025. Read at https://arxiv.org/abs/2405.17556.
+This repository contains the code for the paper ["Probabilistic Verification of Neural Networks using Branch and Bound" by David Boetius, Stefan Leue, and Tobias Sutter (ICML 2025)](https://openreview.net/forum?id=suZ1pNdKrV).
 Probabilistic verification means mathematically proving or disproving properties of the output distribution of a neural network under an input distribution.
 All raw experimental results in this paper are available at https://doi.org/10.5281/zenodo.15521582.
 
