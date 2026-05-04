@@ -34,5 +34,10 @@ else
     conda install -y pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cpuonly -c pytorch
 fi
 
+# Fix MKL conflict with PyTorch 1.12.1 and newer setuptools breaking pkg_resources
+conda remove -y mkl mkl-service mkl_fft mkl_random --force
+conda install -y nomkl
+pip install setuptools==69.5.1
+
 # Install probspecs
 pip install -e .
