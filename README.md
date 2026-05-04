@@ -1,5 +1,7 @@
 [![reproducibility package](https://github.com/user-attachments/assets/3610e80e-f85e-4c99-8663-062c728a2224)](https://doi.org/10.5281/zenodo.15521582)
 
+# Purpose
+This repository is a forked version of David Boetius, Stefan Leue, and Tobias Sutter's repository for the paper listed below. In this repository, I conduct small experiements on their design decisions as part of CS424 - Intro to Machine Learning at Lafayette College. 
 
 # Probabilistic Verification of Neural Networks
 This repository contains the code for the paper ["Probabilistic Verification of Neural Networks using Branch and Bound" by David Boetius, Stefan Leue, and Tobias Sutter (ICML 2025)](https://openreview.net/forum?id=suZ1pNdKrV).
