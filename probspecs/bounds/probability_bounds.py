@@ -1128,7 +1128,6 @@ BRANCH_SELECTION_HEURISTICS: Final[tuple[BRANCH_SELECTION_HEURISTIC_TYPE, ...]] 
     typing.get_args(BRANCH_SELECTION_HEURISTIC_TYPE)
 )
 
-
 class ScoreBranches:
     """
     Scores branches for selecting the most promising branches to split.
@@ -1369,7 +1368,7 @@ class Split:
 
         return self.map(take_selected)
 
-
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 class SelectSplits:
     """Select which dimensions to split for a batch of branches."""
 
@@ -1509,14 +1508,20 @@ class SelectSplits:
         # Adapted from: BaBSR (Rudy Bunel, Jingyue Lu, Ilker Turkaslan, Philip H. S. Torr,
         # Pushmeet Kohli, M. Pawan Kumar: Branch and Bound for Piecewise Linear
         # Neural Network Verification. J. Mach. Learn. Res. 21: 42:1-42:39 (2020))
+
+        #THIS IS THE BIG LINE
         if self._config.split_heuristic_params["better_branch"]:
             score_sat_lbs = torch.maximum(left_sat_lbs, right_sat_lbs)
             score_sat_ubs = torch.minimum(left_sat_ubs, right_sat_ubs)
         else:
             score_sat_lbs = torch.minimum(left_sat_lbs, right_sat_lbs)
             score_sat_ubs = torch.maximum(left_sat_ubs, right_sat_ubs)
+        
 
         select_score = torch.maximum(score_sat_lbs, -score_sat_ubs)
+        #THIS IS THE BIG LINE
+
+
         # At times splitting bounds that actually influence the output can lead
         # to slightly worse bounds than splitting an input that does not influence
         # the output due to floating point error.
@@ -1537,6 +1542,154 @@ class SelectSplits:
         permute = torch.randperm(
             num_splits, generator=self._rng, device=self._rng.device
         )
+
+        select_score = select_score[permute, :]
+        split_dims = torch.argmax(select_score, dim=0)
+        split_dims = permute[split_dims]
+        return splits.select(split_dims)
+
+    def singular_bound_branching(self, branches: BranchStore, prob_weighted=False, isUpper=True, isLower=False) -> Split:
+        """
+        Select input dimensions to split.
+        :code:`singular_bound_branching` selects the dimension (for each batch element)
+        that has the largest lower bound among its splits when isLower is True,
+        and that has the smallest upper bound among its splist when isUpper is True.
+        The improvements in lower and upper bounds are estimated using the
+        bounding algorithm :code:`method`.
+        You should select a cheap bounding algorithm, such as IBP for this task.
+        This split strategy is an adaption of BaBSR from [BunelEtAl2020]_.
+
+        The algorithm to compute bounds can be selected using the
+        :code:`auto_lirpa_method` split heuristic parameter.
+
+        Each split is evaluated either by selecting the branch resulting from the split
+        that has the better or worse bounds.
+        Which is selected is determined by the :code:`better_branch`
+        split heuristic parameter.
+        By default, the better bounds are used, but using the worse bounds may lead to
+        a more balanced branching tree.
+
+        .. [BunelEtAl2020] Rudy Bunel, Jingyue Lu, Ilker Turkaslan, Philip H. S. Torr,
+            Pushmeet Kohli, M. Pawan Kumar: Branch and Bound for Piecewise Linear
+            Neural Network Verification. J. Mach. Learn. Res. 21: 42:1-42:39 (2020)
+
+        :param branches: The branches for which to determine the dimensions to split.
+        :param prob_weighted: Whether consider probabilities when selecting splits.
+        :param isUpper: Splits based on the smallest upper bound
+        :param isLower: Splits based on the largest lower bound
+        :return: The splits to perform.
+        """
+        splits, is_invalid = self.propose_splits(branches)
+        left_bounds, right_bounds, num_splits, batch_size = self._get_branch_bounds(
+            splits
+        )
+
+        method = self._config.split_heuristic_params["auto_lirpa_method"]
+        # We already use very large batch sizes here since left_lbs contains
+        # num input dims * original batch size many elements.
+        # To balance memory requirements better, it makes sense to perform ibp/crown
+        # twice here instead of one call with an extremely large batch size.
+        left_sat_lbs, left_sat_ubs, _ = self._sat_bounds(
+            left_bounds, auto_lirpa_method=method
+        )
+        right_sat_lbs, right_sat_ubs, _ = self._sat_bounds(
+            right_bounds, auto_lirpa_method=method
+        )
+
+        # For unbounded input spaces, bounds may be `nan`. Since nan hampers with
+        # taking the maximum and minimum, we need to replace nan by a proper value.
+        # Since the selection will not depend on the bounds in this case
+        # (we always want to select an unbounded dimension), we just replace nan by 0.0.
+        left_sat_lbs = left_sat_lbs.nan_to_num()
+        left_sat_ubs = left_sat_ubs.nan_to_num()
+        right_sat_lbs = right_sat_lbs.nan_to_num()
+        right_sat_ubs = right_sat_ubs.nan_to_num()
+
+        # recreate (split dims, batch) shape (individual sat bounds are scalars)
+        left_sat_lbs = left_sat_lbs.reshape(num_splits, batch_size)
+        left_sat_ubs = left_sat_ubs.reshape(num_splits, batch_size)
+        right_sat_lbs = right_sat_lbs.reshape(num_splits, batch_size)
+        right_sat_ubs = right_sat_ubs.reshape(num_splits, batch_size)
+
+        if prob_weighted:
+            left_prob_mass = self._prob_mass(left_bounds)
+            right_prob_mass = self._prob_mass(right_bounds)
+            left_prob_mass = left_prob_mass.reshape(num_splits, batch_size)
+            right_prob_mass = right_prob_mass.reshape(num_splits, batch_size)
+            # We want lower bounds to be large, upper bounds to be small,
+            # and probabilities of pruned branches should be large.
+            # Shift bounds, so that we don't multiply the probability masses by zero.
+            max_lbs = max(torch.amax(left_sat_lbs), torch.amax(right_sat_lbs))
+            min_ubs = min(torch.amin(left_sat_ubs), torch.amin(right_sat_ubs))
+            left_sat_lbs = left_prob_mass * (left_sat_lbs - max_lbs - 1.0)
+            left_sat_ubs = (1 - left_prob_mass) * (left_sat_ubs + min_ubs + 1.0)
+            right_sat_lbs = right_prob_mass * (right_sat_lbs - max_lbs - 1.0)
+            right_sat_ubs = (1 - right_prob_mass) * (right_sat_ubs + min_ubs + 1.0)
+
+        # Split selection strategy:
+        # Select the split which makes the lower/upper bound on the branch
+        # with the smaller/larger lower/upper bound largest/smallest.
+        # Branches which make the lower bound positive or the upper bound negative
+        # are the best splits, as they allow for pruning the branch.
+        #
+        # Adapted from: BaBSR (Rudy Bunel, Jingyue Lu, Ilker Turkaslan, Philip H. S. Torr,
+        # Pushmeet Kohli, M. Pawan Kumar: Branch and Bound for Piecewise Linear
+        # Neural Network Verification. J. Mach. Learn. Res. 21: 42:1-42:39 (2020))
+
+        #THIS IS THE BIG LINE
+        select_score = None
+
+        if(isUpper):
+            if self._config.split_heuristic_params["better_branch"]:
+                select_score = torch.minimum(left_sat_ubs, right_sat_ubs)
+            else:
+                select_score = torch.maximum(left_sat_ubs, right_sat_ubs)
+        elif (isLower):
+            if self._config.split_heuristic_params["better_branch"]:
+                select_score = torch.maximum(left_sat_lbs, right_sat_lbs)
+            else:
+                select_score = torch.minimum(left_sat_lbs, right_sat_lbs)
+
+        """
+        #`"better_branch"`: When evaluating splits in `smart_branching`,
+         #  calculate with the branch with the better bounds that results from the
+         #  split or the worse?
+
+        if self._config.split_heuristic_params["better_branch"]:
+            # the case when we score on the "better" branch, the one that is more prunable
+            score_sat_lbs = torch.maximum(left_sat_lbs, right_sat_lbs) # max of lower bounds
+            score_sat_ubs = torch.minimum(left_sat_ubs, right_sat_ubs) # min of upper bounds
+        else:
+            # the case when we score on the "worse" branch, the one that is harder to prune
+            score_sat_lbs = torch.minimum(left_sat_lbs, right_sat_lbs) # min of lower bounds
+            score_sat_ubs = torch.maximum(left_sat_ubs, right_sat_ubs) # max of upper bounds
+        
+
+        select_score = torch.maximum(score_sat_lbs, -score_sat_ubs)
+        #THIS IS THE BIG LINE
+        """
+
+        # At times splitting bounds that actually influence the output can lead
+        # to slightly worse bounds than splitting an input that does not influence
+        # the output due to floating point error.
+        # To avoid this, we round the scores.
+        select_score = torch.round(select_score, decimals=4)
+
+        # Ensure unbounded dimensions are always selected first so that we can compute
+        # sensible bounds next time
+        unbounded_dim = ~branches.in_lbs.isfinite() | ~branches.in_ubs.isfinite()
+        unbounded_dim = unbounded_dim.permute(1, 0)
+        select_score.masked_fill_(unbounded_dim, torch.inf)
+
+        # give invalid splits maximally bad sat scores so that they aren't selected.
+        select_score.masked_fill_(is_invalid, -torch.inf)
+
+        # resolve ties in select_scores randomly to avoid always splitting on the
+        # early dimensions when bounds are very loose
+        permute = torch.randperm(
+            num_splits, generator=self._rng, device=self._rng.device
+        )
+        
         select_score = select_score[permute, :]
         split_dims = torch.argmax(select_score, dim=0)
         split_dims = permute[split_dims]
@@ -1799,3 +1952,6 @@ class SelectSplits:
         left_bounds = {var: (left_lbs[var], left_ubs[var]) for var in left_lbs}
         right_bounds = {var: (right_lbs[var], right_ubs[var]) for var in left_lbs}
         return left_bounds, right_bounds, num_splits, batch_size
+    
+# ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
