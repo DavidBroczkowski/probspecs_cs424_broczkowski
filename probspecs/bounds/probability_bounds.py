@@ -1289,7 +1289,12 @@ SPLIT_HEURISTICS_TYPE: Final = Literal[
     "smart-branching-and-longest-edge",
     "longest-edge",
     "random",
+    "singular_bound_upper",
+    "singular_bound_lower",
+    "prob_weighted_singular_bound_upper",
+    "prob_weighted_singular_bound_lower",
 ]
+
 SPLIT_HEURISTICS: Final[tuple[SPLIT_HEURISTICS_TYPE, ...]] = typing.get_args(
     SPLIT_HEURISTICS_TYPE
 )
@@ -1419,6 +1424,14 @@ class SelectSplits:
                 return self.split_longest_edge(branches)
             case "random":
                 return self.split_random(branches)
+            case "singular_bound_upper":
+                return self.singular_bound_branching(branches, isUpper = True, isLower = False)
+            case "singular_bound_lower":
+                return self.singular_bound_branching(branches, isUpper = False, isLower = True)
+            case "prob_weighted_singular_bound_upper":
+                return self.singular_bound_branching(branches, isUpper = True, isLower = False, prob_weighted = True)
+            case "prob_weighted_singular_bound_lower":
+                return self.singular_bound_branching(branches, isUpper = False, isLower = True, prob_weighted = True)
             case _:
                 raise NotImplementedError()
 
@@ -1452,6 +1465,7 @@ class SelectSplits:
         :param prob_weighted: Whether consider probabilities when selecting splits.
         :return: The splits to perform.
         """
+        print("[INFO] Running smart branch method")
         splits, is_invalid = self.propose_splits(branches)
         left_bounds, right_bounds, num_splits, batch_size = self._get_branch_bounds(
             splits
@@ -1546,6 +1560,7 @@ class SelectSplits:
         select_score = select_score[permute, :]
         split_dims = torch.argmax(select_score, dim=0)
         split_dims = permute[split_dims]
+
         return splits.select(split_dims)
 
     def singular_bound_branching(self, branches: BranchStore, prob_weighted=False, isUpper=True, isLower=False) -> Split:
@@ -1579,6 +1594,8 @@ class SelectSplits:
         :param isLower: Splits based on the largest lower bound
         :return: The splits to perform.
         """
+        #print(f"[INFO] singular_bound_branching running with isUpper equal to {isUpper} and isLower equal to {isLower}")
+        
         splits, is_invalid = self.propose_splits(branches)
         left_bounds, right_bounds, num_splits, batch_size = self._get_branch_bounds(
             splits
@@ -1640,11 +1657,13 @@ class SelectSplits:
         select_score = None
 
         if(isUpper):
+            #print("[INFO] Running the isUpper code block")
             if self._config.split_heuristic_params["better_branch"]:
-                select_score = torch.minimum(left_sat_ubs, right_sat_ubs)
+                select_score = -torch.minimum(left_sat_ubs, right_sat_ubs)
             else:
-                select_score = torch.maximum(left_sat_ubs, right_sat_ubs)
+                select_score = -torch.maximum(left_sat_ubs, right_sat_ubs)
         elif (isLower):
+            #print("[INFO] Running the isLower code block")
             if self._config.split_heuristic_params["better_branch"]:
                 select_score = torch.maximum(left_sat_lbs, right_sat_lbs)
             else:
