@@ -73,6 +73,13 @@ if __name__ == "__main__":
     parser.add_argument(
         "--log", action="store_true", help="Whether to print progress messages."
     )
+    #add argument to change dimension decision method
+    parser.add_argument(
+        "--decision-method",
+        type=str,
+        default="singular-bound-upper",
+        help="The dimension decision method used when splitting hyperrectangles",
+    )
     args = parser.parse_args()
 
     print("Running Experiment: ACAS Xu - Safety")
@@ -176,7 +183,7 @@ if __name__ == "__main__":
     else:
         prob_bounds_config = Path(args.probability_bounds_config)
     prob_bounds_config = yaml.load(prob_bounds_config)
-    prob_bounds_config = {"batch_size": 512, "log": args.log} | prob_bounds_config
+    prob_bounds_config = {"batch_size": 512, "log": args.log, "split_heuristic": args.decision_method} | prob_bounds_config
     print("prob_bounds_config", prob_bounds_config)
     compute_bounds = ProbabilityBounds(device="cpu", **prob_bounds_config)
 

@@ -171,7 +171,7 @@ if __name__ == "__main__":
     else:
         prob_bounds_config = Path(args.probability_bounds_config)
     prob_bounds_config = yaml.load(prob_bounds_config)
-    prob_bounds_config = {"batch_size": 512, "log": args.log} | prob_bounds_config
+    prob_bounds_config = {"batch_size": 512, "log": args.log, "split_heuristic": "singular_bound_upper"} | prob_bounds_config
     compute_bounds = ProbabilityBounds(device="cpu", **prob_bounds_config)
 
     print("Starting Bound Computation.")
